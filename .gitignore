@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Data and Models
+*.pth
+*.pth.tar
+*.h5
+*.csv
+*.txt
+img_align_celeba/
+fl_partition.json
+results_*.json
+*.png
+
+# IDEs
+.vscode/
+.idea/

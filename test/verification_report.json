@@ -1,0 +1,32 @@
+[
+    {
+        "model": "model_fedavg.pth",
+        "auc": 0.9357559999999999,
+        "best_acc": 0.864,
+        "best_threshold": 0.24623115577889454
+    },
+    {
+        "model": "model_fedprox.pth",
+        "auc": 0.970747,
+        "best_acc": 0.9095,
+        "best_threshold": 0.306532663316583
+    },
+    {
+        "model": "model_proposed_combined.pth",
+        "auc": 0.967881,
+        "best_acc": 0.909,
+        "best_threshold": 0.29648241206030157
+    },
+    {
+        "model": "model_proposed_cosine.pth",
+        "auc": 0.962072,
+        "best_acc": 0.894,
+        "best_threshold": 0.306532663316583
+    },
+    {
+        "model": "model_proposed_norm.pth",
+        "auc": 0.9560090000000001,
+        "best_acc": 0.8855,
+        "best_threshold": 0.42713567839195976
+    }
+]
