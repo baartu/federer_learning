@@ -94,3 +94,16 @@ Bu betik şunları yapacaktır:
 4. **Model Güncellemeleri**: İstemciler sunucuya yalnızca omurga ağırlık farklarını (deltaları) geri gönderir. Bu aşamada diferansiyel gizlilik uygulanabilir.
 5. **Birleştirme (Aggregation)**: Sunucu, seçilen algoritmayı kullanarak deltaları birleştirir ve küresel modeli günceller.
 6. **Yineleme (Iteration)**: Belirtilen iletişim turu sayısı kadar 2. ve 5. adımlar tekrarlanır.
+
+
+| Doküman Maddesi | Projede Karşılık Gelen Özellik / Dosya | Durum |
+| :--- | :--- | :--- |
+| **1. Identity-based extreme non-IID** | `dataset.py` & `partition_data.py`: Kimlikler cihazlar arasında asla paylaşılmıyor. | ✅ Tamamlandı |
+| **2. Veri Seti (CelebA)** | `dataset.py`: CelebA (~200k imge) entegrasyonu sağlandı. | ✅ Tamamlandı |
+| **3. 50 Client & %80-%20 Split** | `fl_partition.json`: 50 client ve %20 "unseen" (görülmemiş) test ayrımı yapıldı. | ✅ Tamamlandı |
+| **4. ResNet-18 & ArcFace** | `model.py`: ResNet-18 backbone + ArcFace Loss entegre edildi. | ✅ Tamamlandı |
+| **5. Baseline FL Yöntemleri** | `aggregation.py`: FedAvg ve FedProx implemente edildi. | 🏗️ FedNova ve SCAFFOLD eklenecek |
+| **6. Asıl Katkı (Cosine & Norm)** | `aggregation.py`: proposed_cosine, proposed_norm, proposed_combined eklendi. | ✅ Tamamlandı |
+| **7. Gizlilik (DLG Attack)** | `privacy.py`: Deep Leakage from Gradients sınıfı ve mantığı oluşturuldu. | ✅ Hazır |
+| **8. Savunma (Clipping & DP)** | `client.py` & `privacy.py`: Gradient Clipping ve Differential Privacy eklendi. | ✅ Tamamlandı |
+| **9. Ölçümler (Acc, Conv, Drift)** | `main.py` & `test/evaluator.py`: Accuracy, Convergence ve ROC-AUC ölçülüyor. | ⏳ Drift analizi eklenecek |
