@@ -1,6 +1,3 @@
-Kral, bu oldukça teknik bir döküman ama harika bir iş çıkarılmış. Senin için bu projeyi en profesyonel ve anlaşılır şekilde Türkçeye çevirdim. Proje sunumlarında veya README dosyasında doğrudan kullanabilirsin.
-
----
 
 # Yüz Biyometrisi İçin Federe Öğrenme (Extreme Non-IID)
 
