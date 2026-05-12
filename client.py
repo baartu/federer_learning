@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import copy
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 class FLClient:
     def __init__(self, client_id, dataloader, device="cpu", local_epochs=1, lr=0.01, mu=0.01, num_classes=None, dp_noise=None, dp_clip=1.0):
@@ -50,25 +51,27 @@ class FLClient:
         # Only the backbone is optimized here globally + local ArcFace weights
         optimizer = optim.Adam(local_model.parameters(), lr=self.lr, weight_decay=1e-5)
         
-        from torch.optim.lr_scheduler import ReduceLROnPlateau
         # Sabit kalmasın, model ezberlemeye başlayınca (plateau) öğrenme oranını düşürsün
         scheduler_model = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2)
         scheduler_criterion = ReduceLROnPlateau(self.local_criterion_optimizer, mode='min', factor=0.5, patience=2)
         
+        # Load backbone optimizer state if exists
+        if hasattr(self, 'backbone_opt_state') and self.backbone_opt_state is not None:
+            optimizer.load_state_dict(self.backbone_opt_state)
+            
         global_weights = copy.deepcopy(list(global_model.parameters()))
 
         # --- ARC FACE MARGIN WARMUP ---
-        # Raunt 1-5 arası margin 0.1 (Softmax'a yakın), sonra kademeli artırıyoruz.
-        # Bu modelin "patlamadan" öğrenmeye başlamasını sağlar.
+        # Raunt 1-15 arası margin kademeli artırılır.
         target_margin = 0.3
         if current_round <= 5:
             self.local_criterion.margin = 0.1
-        elif current_round <= 10:
-            self.local_criterion.margin = 0.2
+        elif current_round <= 15:
+            self.local_criterion.margin = 0.1 + (0.2 * (current_round - 5) / 10)
         else:
             self.local_criterion.margin = target_margin
             
-        # Load local optimizer state if exists
+        # Load local criterion optimizer state if exists
         if self.opt_state is not None:
             self.local_criterion_optimizer.load_state_dict(self.opt_state)
 
@@ -81,6 +84,8 @@ class FLClient:
             c_local_dev = {k: v.to(self.device) for k, v in c_local.items()}
         else:
             c_global_dev, c_local_dev = None, None
+
+        for epoch in range(self.local_epochs):
             batch_loss = []
             for images, labels in self.dataloader:
                 if len(images) < 2:
@@ -91,7 +96,7 @@ class FLClient:
                 self.local_criterion_optimizer.zero_grad()
                 
                 embeddings = local_model(images)
-                loss = self.local_criterion(embeddings, labels)
+                loss = self.local_criterion(embeddings, labels, current_round=current_round)
 
                 # Proximal term for FedProx
                 if algo == "fedprox":
@@ -102,55 +107,60 @@ class FLClient:
 
                 loss.backward()
                 
-                # Gradient Clipping: Gradyan patlamasını önlemek için (NaN koruması)
-                torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=1.0)
-                torch.nn.utils.clip_grad_norm_(self.local_criterion.parameters(), max_norm=1.0)
+                # Gradient Clipping
+                torch.nn.utils.clip_grad_norm_(local_model.parameters(), max_norm=5.0) # Increased to 5.0 for better gradient flow
+                torch.nn.utils.clip_grad_norm_(self.local_criterion.parameters(), max_norm=5.0)
                 
                 optimizer.step()
                 
-                # SCAFFOLD: Gradient correction using control variates
+                # SCAFFOLD: Gradient correction
                 if algo == "scaffold" and c_global_dev is not None:
                     with torch.no_grad():
                         for name, param in local_model.named_parameters():
                             if name in c_global_dev:
-                                # y = y - lr * (g - c_i + c)
-                                # optimizer.step() already did y = y - lr * g
-                                # So we need to add lr * (c_i - c)
                                 param.add_(self.lr * (c_local_dev[name] - c_global_dev[name]))
 
                 self.local_criterion_optimizer.step()
                 local_steps += 1
                 
-                # NaN Check
                 if torch.isnan(loss):
                     print(f"  [WARNING] Client {self.client_id} hit NaN loss!")
                     break
                     
                 batch_loss.append(loss.item())
             
-            
             if len(batch_loss) > 0:
                 ep_loss = sum(batch_loss) / len(batch_loss)
                 epoch_loss.append(ep_loss)
-                # Epoch sonunda öğrenme oranlarını ezberlemeye göre dinamik olarak düşür
                 scheduler_model.step(ep_loss)
                 scheduler_criterion.step(ep_loss)
 
         # Calculate Accuracy on the last training data (Representative of local convergence)
-        correct = 0
+        correct_top1 = 0
+        correct_top5 = 0
         total = 0
         local_model.eval()
         with torch.no_grad():
             for images, labels in self.dataloader:
                 images, labels = images.to(self.device), labels.to(self.device)
                 embeddings = local_model(images)
-                # ArcFace accuracy calculation: Compare embeddings with local head weights
+                
                 cosine = F.linear(F.normalize(embeddings), F.normalize(self.local_criterion.weight))
-                _, predicted = torch.max(cosine.data, 1)
+                
+                # Top-1
+                _, predicted_top1 = torch.max(cosine.data, 1)
+                correct_top1 += (predicted_top1 == labels).sum().item()
+                
+                # Top-5
+                _, predicted_top5 = torch.topk(cosine.data, 5, dim=1)
+                for i in range(labels.size(0)):
+                    if labels[i] in predicted_top5[i]:
+                        correct_top5 += 1
+                
                 total += labels.size(0)
-                correct += (predicted == labels).sum().item()
         
-        avg_acc = 100.0 * correct / total if total > 0 else 0.0
+        avg_acc_top1 = 100.0 * correct_top1 / total if total > 0 else 0.0
+        avg_acc_top5 = 100.0 * correct_top5 / total if total > 0 else 0.0
 
         # Calculate weight delta (Update)
         delta_weights = {}
@@ -172,7 +182,8 @@ class FLClient:
         # Return local state so server can persist it
         local_state_to_save = {
             "weights": {k: v.cpu() for k, v in self.local_criterion.state_dict().items()},
-            "opt_state": self.local_criterion_optimizer.state_dict()
+            "opt_state": self.local_criterion_optimizer.state_dict(),
+            "backbone_opt_state": optimizer.state_dict()
         }
         
         # SCAFFOLD: Update local control variate
@@ -201,8 +212,9 @@ class FLClient:
         extra_metrics = {
             "local_steps": local_steps,
             "new_c_local": new_c_local,
-            "drift_norm": drift_norm
+            "drift_norm": drift_norm,
+            "acc_top5": avg_acc_top5
         }
         
-        return delta_weights, num_samples, avg_loss, avg_acc, local_state_to_save, extra_metrics
+        return delta_weights, num_samples, avg_loss, avg_acc_top1, local_state_to_save, extra_metrics
 

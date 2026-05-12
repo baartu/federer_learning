@@ -52,7 +52,7 @@ class ArcFaceLoss(nn.Module):
         self.th = math.cos(math.pi - margin)
         self.mm = math.sin(math.pi - margin) * margin
 
-    def forward(self, embeddings, labels):
+    def forward(self, embeddings, labels, current_round=1):
         # Normalize weights
         cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
         cosine = cosine.clamp(-1.0 + 1e-7, 1.0 - 1e-7) # Numerical stability
@@ -69,7 +69,11 @@ class ArcFaceLoss(nn.Module):
         
         # Apply margin to the target class
         output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
-        output *= self.scale
+        
+        # Scale Warmup: Başlangıçta 16'dan başlayıp 64'e kadar rauntlarla artırıyoruz.
+        # Bu, modelin başlangıçta daha geniş bir gradyan alanına sahip olmasını sağlar.
+        curr_scale = min(self.scale, 16.0 + (self.scale - 16.0) * (current_round / 10.0))
+        output *= curr_scale
         
         loss = F.cross_entropy(output, labels)
         return loss
@@ -88,7 +92,7 @@ class CosFaceLoss(nn.Module):
         self.weight = nn.Parameter(torch.FloatTensor(num_classes, embedding_size))
         nn.init.xavier_uniform_(self.weight)
 
-    def forward(self, embeddings, labels):
+    def forward(self, embeddings, labels, current_round=1):
         # Normalize weights
         cosine = F.linear(F.normalize(embeddings), F.normalize(self.weight))
         
@@ -98,7 +102,10 @@ class CosFaceLoss(nn.Module):
         
         # Apply cosine margin to the target class
         output = cosine - (one_hot * self.margin)
-        output *= self.scale
+        
+        # Scale Warmup
+        curr_scale = min(self.scale, 16.0 + (self.scale - 16.0) * (current_round / 10.0))
+        output *= curr_scale
         
         loss = F.cross_entropy(output, labels)
         return loss

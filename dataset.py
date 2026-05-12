@@ -26,6 +26,8 @@ class CelebA_IdentityBased_Dataset(Dataset):
             self.transform = transform if transform else transforms.Compose([
                 transforms.Resize((112, 112)),
                 transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(15), # Yüz açılarındaki küçük sapmalar için
+                transforms.RandomGrayscale(p=0.1), # Işık değişimlerine direnç için
                 transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
@@ -40,42 +42,26 @@ class CelebA_IdentityBased_Dataset(Dataset):
         with open(partition_json_path, 'r') as f:
             self.partition_data = json.load(f)
             
-        self.images = []
-        self.labels = []
-        
-        # We need a global mapping of identity to standard integer class labels
-        # because the face recognition loss usually needs integer class numbers [0, num_classes-1]
-        self._build_class_mapping()
-        
+        # Cache identity mapping at class level to avoid re-reading 200k lines for 50 clients
+        if not hasattr(CelebA_IdentityBased_Dataset, '_global_img_to_id'):
+            self._load_global_mappings(os.path.join(root_dir, "identity_CelebA.txt"))
+            
         if split == "train":
             if client_id is None:
                 raise ValueError("client_id must be provided for train split")
             if client_id not in self.partition_data["train_clients"]:
                 raise ValueError(f"Unknown client_id {client_id}")
                 
-            client_data = self.partition_data["train_clients"][client_id]
-            self.images = client_data["images"]
-            # To get labels, we need to map the image back to its identity.
-            # We can parse it from identity_CelebA.txt if needed, but since we parsed it
-            # once, let's read the identity file quickly to get per-image id
-            self._load_image_to_id(os.path.join(root_dir, "identity_CelebA.txt"))
-            
+            self.images = self.partition_data["train_clients"][client_id]["images"]
         elif split == "test":
             self.images = self.partition_data["test_unseen"]["images"]
-            self._load_image_to_id(os.path.join(root_dir, "identity_CelebA.txt"))
-            
-        else:
-            raise ValueError("split must be 'train' or 'test'")
+        
+        self.labels = [CelebA_IdentityBased_Dataset._global_id_to_int[CelebA_IdentityBased_Dataset._global_img_to_id[img]] for img in self.images]
 
-    def _build_class_mapping(self):
-        # We assign an integer index [0, 10176] to each unique identity ID
-        # Since identity IDs in CelebA are 1-10177, we could just subtract 1, 
-        # but let's be safe and map them dynamically.
-        pass # Will implement inside _load_image_to_id to ensure consistency
-
-    def _load_image_to_id(self, identity_file):
-        self.img_to_id = {}
-        self.id_to_int_label = {}
+    def _load_global_mappings(self, identity_file):
+        print(f"--- Parsing identity file (Once): {identity_file} ---")
+        CelebA_IdentityBased_Dataset._global_img_to_id = {}
+        CelebA_IdentityBased_Dataset._global_id_to_int = {}
         curr_label = 0
         
         with open(identity_file, 'r') as f:
@@ -83,13 +69,11 @@ class CelebA_IdentityBased_Dataset(Dataset):
                 parts = line.strip().split()
                 if len(parts) == 2:
                     img_name, person_id = parts
-                    self.img_to_id[img_name] = person_id
-                    if person_id not in self.id_to_int_label:
-                        self.id_to_int_label[person_id] = curr_label
+                    CelebA_IdentityBased_Dataset._global_img_to_id[img_name] = person_id
+                    if person_id not in CelebA_IdentityBased_Dataset._global_id_to_int:
+                        CelebA_IdentityBased_Dataset._global_id_to_int[person_id] = curr_label
                         curr_label += 1
-                        
-        # Now populate self.labels based on self.images
-        self.labels = [self.id_to_int_label[self.img_to_id[img]] for img in self.images]
+        print(f"--- Global identity mapping built: {len(CelebA_IdentityBased_Dataset._global_id_to_int)} classes ---")
 
     def __len__(self):
         return len(self.images)

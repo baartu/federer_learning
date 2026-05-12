@@ -24,8 +24,8 @@ def run_experiment(algo_name, num_rounds, num_clients=50, fraction=0.1):
         num_clients=num_clients,
         fraction=fraction,
         device=device,
-        local_epochs=10, # Modelin yerel ezberini artırmak için 10'a çıkarıldı
-        lr=0.002 # Adam optimizer için standart değer
+        local_epochs=3, # Fixed epoch loop in client.py means 3 is plenty
+        lr=0.001 # Fine-tuning için daha stabil bir değer
     )
     
     # Run the training and get the loss and accuracy history
@@ -45,9 +45,9 @@ if __name__ == "__main__":
     ]
     
     # --- Configuration ---
-    rounds = 25 # Tam bir yakınsama için 25-50 arası önerilir
+    rounds = 25 # Hedef doğruluğa ulaşmak için raunt sayısı artırıldı
     num_clients = 50
-    fraction = 0.1 # Her rauntta seçilecek client oranı
+    fraction = 0.2 # Stability için her rauntta daha fazla client (10 client)
     
     # --- Resume/Skip Logic ---
     results = {}

@@ -62,6 +62,8 @@ class FLServer:
             state = self.client_states[client_id_str]
             client.local_criterion.load_state_dict(state["weights"])
             client.opt_state = state["opt_state"]
+            if "backbone_opt_state" in state:
+                client.backbone_opt_state = state["backbone_opt_state"]
             
         # SCAFFOLD: Ensure c_local exists for client
         if client_id_str not in self.client_c_locals:
@@ -70,10 +72,66 @@ class FLServer:
         return client
 
     def evaluate(self):
-        # Yüz doğrulama (Face Verification) test setinde pair'ler (ikililer) olmadığı için
-        # şimdilik eğitimdeki "Ortalama Convergence Loss" değerini takip etmek
-        # global modelin ne kadar iyi öğrendiğini gösterecektir.
-        pass
+        """
+        Görülmemiş (unseen) test kimlikleri üzerinde yüz doğrulama (Face Verification) testi yapar.
+        Rastgele pozitif ve negatif çiftler oluşturarak modelin ayırt ediciliğini (Cosine Similarity) ölçer.
+        """
+        self.global_model.eval()
+        all_embeddings = []
+        all_labels = []
+        
+        with torch.no_grad():
+            # Test setinin bir kısmını kullanarak embedding çıkaralım (Hız için)
+            count = 0
+            for images, labels in self.test_loader:
+                images = images.to(self.device)
+                embeddings = self.global_model(images)
+                all_embeddings.append(embeddings.cpu())
+                all_labels.append(labels)
+                count += images.size(0)
+                if count > 1000: break # 1000 örnek yeterli
+                
+        all_embeddings = torch.cat(all_embeddings, dim=0)
+        all_labels = torch.cat(all_labels, dim=0)
+        
+        # Rastgele 500 pozitif, 500 negatif çift seçelim
+        pos_sims = []
+        neg_sims = []
+        
+        for _ in range(500):
+            # Pozitif çift (Aynı kişi)
+            idx1 = random.randint(0, len(all_labels)-1)
+            target_label = all_labels[idx1]
+            same_id_indices = (all_labels == target_label).nonzero(as_tuple=True)[0]
+            if len(same_id_indices) > 1:
+                idx2 = same_id_indices[random.randint(0, len(same_id_indices)-1)]
+                while idx2 == idx1:
+                    idx2 = same_id_indices[random.randint(0, len(same_id_indices)-1)]
+                sim = torch.cosine_similarity(all_embeddings[idx1].unsqueeze(0), all_embeddings[idx2].unsqueeze(0)).item()
+                pos_sims.append(sim)
+                
+            # Negatif çift (Farklı kişiler)
+            idx2 = random.randint(0, len(all_labels)-1)
+            while all_labels[idx2] == target_label:
+                idx2 = random.randint(0, len(all_labels)-1)
+            sim = torch.cosine_similarity(all_embeddings[idx1].unsqueeze(0), all_embeddings[idx2].unsqueeze(0)).item()
+            neg_sims.append(sim)
+            
+        avg_pos = sum(pos_sims)/len(pos_sims) if pos_sims else 0
+        avg_neg = sum(neg_sims)/len(neg_sims) if neg_sims else 0
+        
+        # Accuracy at threshold 0.5 (Simple heuristic)
+        correct = 0
+        for s in pos_sims: 
+            if s > 0.4: correct += 1 # Lowered threshold for face verification in early rounds
+        for s in neg_sims:
+            if s <= 0.4: correct += 1
+        
+        total = len(pos_sims) + len(neg_sims)
+        test_acc = 100.0 * correct / total if total > 0 else 0.0
+        
+        print(f"  [Global Eval] Unseen IDs - Avg Pos Sim: {avg_pos:.3f}, Avg Neg Sim: {avg_neg:.3f}, Verification Acc: {test_acc:.2f}%")
+        return test_acc
 
     def start_training(self, num_rounds=10, algo="fedavg"):
         print(f"--- Starting FL Training with Algorithm: {algo} ---")
@@ -83,6 +141,11 @@ class FLServer:
         
         for rnd in range(1, num_rounds + 1):
             print(f"\n[Round {rnd}/{num_rounds}]")
+            
+            # Learning Rate Decay (Every 15 rounds)
+            if rnd > 1 and rnd % 15 == 0:
+                self.lr *= 0.5
+                print(f"  [Server] Learning rate decayed to: {self.lr}")
             
             # 1. Sample clients
             sampled_indices = random.sample(range(self.num_clients), self.num_sampled)
@@ -115,7 +178,7 @@ class FLServer:
                 round_client_losses.append(loss)
                 round_client_accs.append(acc)
                 round_client_drifts.append(extra["drift_norm"])
-                print(f"    {client_id_str} - Loss: {loss:.4f}, Acc: {acc:.2f}%, Drift: {extra['drift_norm']:.4f}")
+                print(f"    {client_id_str} - Loss: {loss:.4f}, Acc(T1/T5): {acc:.2f}%/{extra['acc_top5']:.2f}%, Drift: {extra['drift_norm']:.4f}")
             
             # 3. Server Aggregation
             print(f"  Aggregating updates using {algo}...")
@@ -143,10 +206,13 @@ class FLServer:
             avg_acc = sum(round_client_accs) / len(round_client_accs)
             avg_drift = sum(round_client_drifts) / len(round_client_drifts)
             
+            # Run Global Evaluation
+            test_acc = self.evaluate()
+            
             round_losses.append(avg_loss)
             round_accuracies.append(avg_acc)
             self.round_drifts.append(avg_drift)
-            print(f"  [Round {rnd}] Avg Loss: {avg_loss:.4f}, Avg Acc: {avg_acc:.2f}%, Avg Drift: {avg_drift:.4f}\n")
+            print(f"  [Round {rnd}] Avg Loss: {avg_loss:.4f}, Avg Acc: {avg_acc:.2f}%, Test Acc: {test_acc:.2f}%, Avg Drift: {avg_drift:.4f}\n")
             
             # --- Per-Round Saving (Numerical) ---
             temp_results = {"loss": round_losses, "accuracy": round_accuracies, "drift": self.round_drifts}

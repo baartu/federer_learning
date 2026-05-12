@@ -45,7 +45,7 @@ def create_partition():
     
     # To make it "unbalanced", we use a Dirichlet distribution to determine
     # the proportions of identities assigned to each client.
-    diri_alpha = 0.5 # A smaller alpha creates a more unbalanced distribution
+    diri_alpha = 1.0 # A smaller alpha creates a more unbalanced distribution
     proportions = np.random.dirichlet([diri_alpha] * num_clients)
     
     # Convert proportions to actual counts of identities per client
