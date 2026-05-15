@@ -25,8 +25,8 @@ class FLServer:
         self.global_model = FaceResNet18(pretrained=True).to(self.device)
         self.prev_global_update = None
         
-        # SCAFFOLD: Control variates
-        self.c_global = {k: torch.zeros(v.shape).float() for k, v in self.global_model.state_dict().items()}
+        # SCAFFOLD: Control variates (Sadece eğitilebilir parametreler için)
+        self.c_global = {k: torch.zeros(v.shape).float() for k, v in self.global_model.named_parameters()}
         self.client_c_locals = {} # client_id -> c_local
         
         # Drift Analysis storage
@@ -67,7 +67,7 @@ class FLServer:
             
         # SCAFFOLD: Ensure c_local exists for client
         if client_id_str not in self.client_c_locals:
-            self.client_c_locals[client_id_str] = {k: torch.zeros(v.shape).float() for k, v in self.global_model.state_dict().items()}
+            self.client_c_locals[client_id_str] = {k: torch.zeros(v.shape).float() for k, v in self.global_model.named_parameters()}
             
         return client
 

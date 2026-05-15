@@ -1,109 +1,94 @@
-
 # Yüz Biyometrisi İçin Federe Öğrenme (Extreme Non-IID)
 
-## Genel Bakış
+Bu proje, yüz tanıma görevleri için özel olarak tasarlanmış, **aşırı Non-IID** veri dağılımları altında çalışan bir **Federe Öğrenme (Federated Learning)** çerçevesidir. Proje, kimlik tabanlı veri ayrımı (identity-based partitioning), gelişmiş birleştirme algoritmaları ve gizlilik koruma yöntemlerini içerir.
 
-Bu depo (repository), yüz tanıma görevleri için özel olarak tasarlanmış bir **Federe Öğrenme (FL)** sisteminin PyTorch uygulamasını içerir. Sistem, her istemcinin (cihazın) yalnızca belirli kişilerin fotoğraflarına erişebildiği gerçekçi bir senaryoyu simüle etmek amacıyla, **kimlik tabanlı aşırı Non-IID (dağılımı özdeş olmayan)** şeklinde bölümlere ayrılmış **CelebA veri setini** kullanır.
+---
 
-Ana model, bir özellik çıkarıcı (backbone) olarak kullanılan **ResNet-18** tabanlıdır ve istemcilerde yerel olarak **ArcFace** kayıp fonksiyonu (loss function) ile eğitilir. Proje, aşırı Non-IID veri dağılımının neden olduğu ağırlık sapmalarını (istemci kayması - client drift) azaltmak için çeşitli birleştirme (aggregation) stratejilerini incelemektedir.
+## 📊 Algoritma İzlenebilirlik Raporu (Kod Haritası)
 
-## Temel Özellikler
+Bu tablo, projede kullanılan temel algoritmaların ve tekniklerin hangi dosyalarda ve hangi satır aralıklarında uygulandığını detaylandırmaktadır.
 
-- **Aşırı Non-IID Veri Bölümleme:** İstemcilere, gerçek dünya koşullarını simüle etmek için birbirini dışlayan (mutually exclusive) kimlikler atanmıştır.
-- **Yerel ArcFace Eğitimi ve Kalıcılık (Persistence):** Her istemci, sunucuyla _paylaşılmayan_ yerel bir ArcFace sınıflandırma katmanı eğitir. Kritik bir güncelleme ile bu yerel ağırlıklar artık sunucu tarafında istemci bazlı olarak saklanmakta ve her rauntta sıfırlanmak yerine kaldığı yerden devam etmektedir. Bu, modelin gerçek anlamda yakınsamasını sağlar.
-- **Gelişmiş Veri Artırma:** Eğitim sırasında `RandomHorizontalFlip` ve `ColorJitter` uygulanarak modelin yüz tanıma konusundaki genel performans ve dayanıklılığı artırılmıştır.
-- **Hata Oranı ve Doğruluk Takibi:** Sistem artık sadece "Loss" değerini değil, aynı zamanda "% Error Rate" ve "% Accuracy" değerlerini de takip ederek grafikler oluşturur.
-- **GPU Optimizasyonu:** Kodlar NVIDIA GPU (RTX serisi) üzerinde en yüksek verimlilikle çalışacak şekilde ayarlanmıştır. CUDA desteği otomatik olarak algılanır ve eğitim sürecini hızlandırır.
-- **Çeşitli Birleştirme Algoritmaları:**
-  - `fedavg`: Standart Federe Ortalama (Standard Federated Averaging).
-  - `fedprox`: Yerel güncellemeleri kısıtlamak için Federe Proksimal optimizasyon.
-  - `proposed_cosine`: Kosinüs benzerliğine dayalı özel birleştirme ağırlıklandırması.
-  - `proposed_norm`: Güncelleme normlarına dayalı özel birleştirme ağırlıklandırması.
-  - `proposed_combined`: Hibrit bir özel birleştirme yaklaşımı.
-- **Gizlilik Koruma:** İstemci verilerini çıkarım saldırılarına karşı korumak için gürültü ekleyen ve gradyanları kırpan Diferansiyel Gizlilik (Differential Privacy - DP) desteği.
+| Algoritma / Teknik       | Uygulandığı Dosya | Satır Aralığı    | Açıklama                                                                                                            |
+| :----------------------- | :---------------- | :--------------- | :------------------------------------------------------------------------------------------------------------------ |
+| **FedAvg**               | [aggregation.py]  | 22-26            | İstemci güncellemelerinin (deltaların) örnek sayısına göre ağırlıklı ortalaması.                                    |
+| **FedProx**              | [client.py]       | 102-106          | Yerel sapmayı (drift) sınırlamak için loss fonksiyonuna eklenen Proximal Terim.                                     |
+| **FedProx (Agg)**        | [aggregation.py]  | 22-26            | FedProx, sunucu tarafında FedAvg ile aynı birleştirme mantığını kullanır.                                           |
+| **SCAFFOLD**             | [client.py]       | 117-122, 191-203 | Control Variates (Kontrol Değişkenleri) ile gradyan düzeltmesi ve yerel drift güncellemesi.                         |
+| **SCAFFOLD (Global)**    | [server.py]       | 191-199          | Sunucu tarafında küresel kontrol değişkeninin (c_global) güncellenmesi.                                             |
+| **FedNova**              | [aggregation.py]  | 29-37            | Yerel iterasyon (local steps) farklılıklarını normalize eden ağırlıklı birleştirme.                                 |
+| **Proposed (Cosine)**    | [aggregation.py]  | 62-67, 71-72     | Bir önceki raunt güncellemesi ile mevcut istemci güncellemesi arasındaki kosinüs benzerliğine göre ağırlıklandırma. |
+| **Proposed (Norm)**      | [aggregation.py]  | 56-60, 73-74     | İstemci güncellemelerinin L2 normuna (sapma miktarı) göre ters orantılı ağırlıklandırma.                            |
+| **Proposed (Combined)**  | [aggregation.py]  | 75-79            | Cosine similarity ve Gradient Norm metriklerinin hibrit (birleştirilmiş) kullanımı.                                 |
+| **ArcFace Loss**         | [model.py]        | 36-79            | Açısal pay (Angular Margin) ekleyerek sınıf içi benzerliği artıran kayıp fonksiyonu.                                |
+| **CosFace Loss**         | [model.py]        | 81-111           | Kosinüs payı (Cosine Margin) tabanlı büyük marjlı sınıflandırma.                                                    |
+| **Differential Privacy** | [privacy.py]      | 81-103           | Gradyan kırpma (clipping) ve Gauss gürültüsü ekleyerek veri gizliliğini sağlama.                                    |
+| **DLG Attack**           | [privacy.py]      | 7-79             | Deep Leakage from Gradients (Gradyanlardan Veri Sızıntısı) saldırı simülasyonu.                                     |
+| **Margin Warmup**        | [client.py]       | 64-72            | ArcFace marjının ilk turlarda kademeli artırılarak eğitimin stabilize edilmesi.                                     |
+| **Drift Norm Takibi**    | [client.py]       | 206-210          | Her istemcinin küresel modelden ne kadar saptığının L2 normu ile hesaplanması.                                      |
 
-## Dizin Yapısı
+---
 
-- `main.py`: FL deneylerini çalıştırmak ve farklı algoritmaları kıyaslamak için giriş noktasıdır. Yakınsama grafiklerini oluşturur.
-- `server.py`: İstemci örnekleme, küresel model yönetimi ve birleştirmeden sorumlu `FLServer` sınıfını içerir.
-- `client.py`: Yerel eğitim (ResNet-18 omurga + ArcFace) ve diferansiyel gizlilik uygulamaktan sorumlu `FLClient` sınıfını içerir.
-- `dataset.py`: Bölümlenmiş CelebA görüntülerini yüklemek ve kimlik etiketlerini eşlemek için PyTorch `Dataset` sınıfını (`CelebA_IdentityBased_Dataset`) içerir.
-- `model.py`: `FaceResNet18` ve `ArcFaceLoss` dahil olmak üzere sinir ağı tanımlarını içerir.
-- `aggregation.py`: Çeşitli sunucu tarafı birleştirme stratejilerinin uygulamalarını içerir.
-- `privacy.py`: Model güncellemelerine Diferansiyel Gizlilik (DP) gürültüsü uygulamak için yardımcı araçlar.
-- `partition_data.py`: CelebA veri setini aşırı Non-IID alt kümelere ayırmak ve `fl_partition.json` dosyasını oluşturmak için kullanılan betik.
-- `download_identity.py`: Gerekli kimlik meta verilerini indirmek için yardımcı betik.
-- `fl_partition.json`: İstemcileri belirli görüntülerle eşleyen veri bölümleme haritası.
+## 🚀 Temel Özellikler
 
-## Gereksinimler
+- **Aşırı Non-IID (Identity-Based):** CelebA veri seti, kimlikler (identities) cihazlar arasında asla paylaşılmayacak şekilde bölünmüştür.
+- **Backbone & Local Head Mimarisi:** ResNet-18 omurgası (backbone) federatif olarak eğitilirken, ArcFace katmanları her istemcide yerel (local) tutulur ve sunucu tarafından kalıcılığı (persistence) sağlanır.
+- **Dinamik Ölçekleme (Scale Warmup):** ArcFace ölçek parametresi (`s`), ilk rauntlarda kademeli artırılarak gradyan patlamaları önlenir.
+- **Kapsamlı Metrikler:** Sadece kayıp (loss) değil, aynı zamanda Top-1/Top-5 doğruluk, model sapması (drift) ve "unseen" (hiç görülmemiş) test setinde Face Verification başarımı ölçülür.
 
-- Python 3.8+
-- PyTorch & Torchvision
-- PIL (Pillow)
-- Matplotlib
+---
 
-### Donanım ve CUDA Notu (RTX 50-Serisi Kullanıcıları İçin)
+## 📂 Dosya Yapısı
 
-Eğer RTX 5060 Ti veya Blackwell mimarili (`sm_120`) bir kart kullanıyorsanız, mevcut PyTorch sürümleri henüz bu kartları desteklemiyor olabilir. Bu durumda kod otomatik olarak **CPU** moduna geçecek ve stabiliteyi koruyacaktır.
+- `main.py`: Deneylerin ana giriş noktası. Algoritmaları yarıştırır ve görselleştirir.
+- `server.py`: Küresel model yönetimi, istemci seçimi ve SCAFFOLD küresel güncellemeleri.
+- `client.py`: Yerel eğitim döngüsü, FedProx/SCAFFOLD yerel mantığı ve DP uygulaması.
+- `aggregation.py`: **Tüm birleştirme algoritmalarının merkezi.** FedAvg, FedNova ve Önerilen (Proposed) yöntemler burada bulunur.
+- `model.py`: `FaceResNet18`, `ArcFaceLoss` ve `CosFaceLoss` tanımları.
+- `privacy.py`: Diferansiyel Gizlilik (DP) ve DLG saldırı araçları.
+- `dataset.py`: CelebA Identity-Based veri yükleyici.
 
-**Çözüm:**
-- Gelecek PyTorch güncellemelerini takip edin.
-- Şu an için CPU üzerinden eğitim yapabilirsiniz (ancak daha yavaştır).
-- `torch.AcceleratorError: CUDA error: no kernel image is available` hatası alıyorsanız, bu durum mimari uyumsuzluğundan kaynaklanmaktadır.
+---
 
-## Kullanım
+## 🛠️ Kullanım
 
-### 1. Veri Setini Hazırlayın
+### 1. Hazırlık
 
-CelebA veri setinin indirildiğinden ve dışa aktarıldığından emin olun. Dizin yapısı şu şekilde olmalıdır:
+Gerekli kütüphaneleri yükleyin:
 
-```text
-img_align_celeba/
-    img_align_celeba/
-        000001.jpg
-        ...
-identity_CelebA.txt
+```bash
+pip install -r requirements.txt
 ```
 
-İstemci veri dağılımını oluşturmak için bölümleme betiğini çalıştırın (eğer `fl_partition.json` zaten mevcut değilse):
+### 2. Veri Bölümleme
+
+Veri setini 50 istemciye kimlik tabanlı olarak ayırmak için:
 
 ```bash
 python partition_data.py
 ```
 
-### 2. Deneyleri Çalıştırın
+### 3. Eğitim ve Kıyaslama
 
-Farklı federe öğrenme algoritmalarını kıyaslamak için ana betiği çalıştırın:
+Farklı algoritmaları test etmek için `main.py` dosyasını çalıştırın:
 
 ```bash
 python main.py
 ```
 
-Bu betik şunları yapacaktır:
+Eğitim sonunda `results_plot.png` ve her algoritma için `live_plot_{algo}.png` dosyaları otomatik olarak oluşturulacaktır.
 
-1. Küresel modeli başlatır.
-2. Birden fazla iletişim turu (varsayılan: 20 tur) boyunca 50 istemci üzerinde simülasyon yapar.
-3. Her algoritma için ortalama eğitim kaybını (loss) değerlendirir ve kaydeder.
-4. Kök dizinde karşılaştırmalı bir grafik olan `results_plot.png` dosyasını oluşturur.
+---
 
-## Sistem Mimarisi Detayları
+## 📈 Ölçüm ve Değerlendirme
 
-1. **Başlatma (Initialization)**: Sunucu, küresel bir ResNet-18 modeli başlatır.
-2. **İstemci Seçimi (Client Selection)**: Her iletişim turu için istemcilerin bir kısmı (örneğin %10'u) rastgele seçilir.
-3. **Yerel Eğitim (Local Training)**: İstemciler küresel omurgayı alır, kendi yerel ArcFace katmanlarını ekler ve kendi yerel Non-IID verileri üzerinde eğitirler.
-4. **Model Güncellemeleri**: İstemciler sunucuya yalnızca omurga ağırlık farklarını (deltaları) geri gönderir. Bu aşamada diferansiyel gizlilik uygulanabilir.
-5. **Birleştirme (Aggregation)**: Sunucu, seçilen algoritmayı kullanarak deltaları birleştirir ve küresel modeli günceller.
-6. **Yineleme (Iteration)**: Belirtilen iletişim turu sayısı kadar 2. ve 5. adımlar tekrarlanır.
+Sistem her rauntta şu metrikleri raporlar:
 
+- **Avg Loss:** Seçilen istemcilerin ortalama eğitim kaybı.
+- **Avg Acc:** İstemci tarafındaki yerel Top-1 doğruluk oranı.
+- **Test Acc (Verification):** Hiç görülmemiş test kimlikleri üzerinde modelin yüz doğrulama başarımı (Cosine Similarity tabanlı).
+- **Avg Drift:** İstemci modellerinin küresel modelden uzaklaşma miktarı (L2).
 
-| Doküman Maddesi | Projede Karşılık Gelen Özellik / Dosya | Durum |
-| :--- | :--- | :--- |
-| **1. Identity-based extreme non-IID** | `dataset.py` & `partition_data.py`: Kimlikler cihazlar arasında asla paylaşılmıyor. | ✅ Tamamlandı |
-| **2. Veri Seti (CelebA)** | `dataset.py`: CelebA (~200k imge) entegrasyonu sağlandı. | ✅ Tamamlandı |
-| **3. 50 Client & %80-%20 Split** | `fl_partition.json`: 50 client ve %20 "unseen" (görülmemiş) test ayrımı yapıldı. | ✅ Tamamlandı |
-| **4. ResNet-18 & ArcFace** | `model.py`: ResNet-18 backbone + ArcFace Loss entegre edildi. | ✅ Tamamlandı |
-| **5. Baseline FL Yöntemleri** | `aggregation.py`: FedAvg ve FedProx implemente edildi. | ✅ Tamamlandı |
-| **6. Asıl Katkı (Cosine & Norm)** | `aggregation.py`: proposed_cosine, proposed_norm, proposed_combined eklendi. | ✅ Tamamlandı |
-| **7. Gizlilik (DLG Attack)** | `privacy.py`: Deep Leakage from Gradients sınıfı ve mantığı oluşturuldu. | ✅ Hazır |
-| **8. Savunma (Clipping & DP)** | `client.py` & `privacy.py`: Gradient Clipping ve Differential Privacy eklendi. | ✅ Tamamlandı |
-| **9. Ölçümler (Acc, Conv, Drift)** | `main.py` & `test/evaluator.py`: Accuracy, Convergence ve ROC-AUC ölçülüyor. | ✅ Tamamlandı |
+---
+
+> [!NOTE]
+> Bu proje, akademik araştırma amaçlı olup federatif öğrenmede model sapmasını (client drift) azaltmaya yönelik yeni yöntemlerin test edilmesi için geliştirilmiştir.

@@ -196,7 +196,7 @@ class FLClient:
                 for name, param in local_model.named_parameters():
                     if name in global_state:
                         # global_state[name] is x, param.cpu() is y_i
-                        diff = (global_state[name] - param.cpu()) / (local_steps * self.lr)
+                        diff = (global_state[name].cpu() - param.cpu()) / (local_steps * self.lr)
                         if c_local is not None and name in c_local and c_global is not None and name in c_global:
                             new_c_local[name] = c_local[name] - c_global[name] + diff
                         else:
