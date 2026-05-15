@@ -1,94 +1,78 @@
+
 # Yüz Biyometrisi İçin Federe Öğrenme (Extreme Non-IID)
 
-Bu proje, yüz tanıma görevleri için özel olarak tasarlanmış, **aşırı Non-IID** veri dağılımları altında çalışan bir **Federe Öğrenme (Federated Learning)** çerçevesidir. Proje, kimlik tabanlı veri ayrımı (identity-based partitioning), gelişmiş birleştirme algoritmaları ve gizlilik koruma yöntemlerini içerir.
+Bu çalışma, yüz tanıma sistemlerinde karşılaşılan **Aşırı Non-IID** (bağımsız ve özdeş olmayan dağılım) sorununu Federe Öğrenme (FL) çerçevesinde ele alarak farklı birleştirme algoritmalarını kıyaslamaktadır. Proje, kimlik tabanlı veri ayrımı, gelişmiş birleştirme stratejileri ve gizlilik koruma yöntemlerini kapsamlı bir şekilde analiz eder.
 
 ---
 
-## 📊 Algoritma İzlenebilirlik Raporu (Kod Haritası)
+## 📝 1. Özet (Abstract)
 
-Bu tablo, projede kullanılan temel algoritmaların ve tekniklerin hangi dosyalarda ve hangi satır aralıklarında uygulandığını detaylandırmaktadır.
+Yapılan deneysel analizler sonucunda **FedProx**, proksimal terim regülasyonu sayesinde model sapmasını (Drift) diğer algoritmalara oranla 3 kat daha düşük seviyelerde (35-70 bandı) tutarak ve **%97.29** ile en yüksek doğruluğa ulaşarak en başarılı ve stabil algoritma olarak öne çıkmıştır. Tarafımızca geliştirilen **Proposed Combined** yöntemi ise gradyan yönü ve büyüklüğünü temel alan hibrit yaklaşımıyla %95.40 doğruluğa çok daha pürüzsüz bir eğriyle ulaşarak inovatif bir alternatif sunmuştur. 
 
-| Algoritma / Teknik       | Uygulandığı Dosya | Satır Aralığı    | Açıklama                                                                                                            |
-| :----------------------- | :---------------- | :--------------- | :------------------------------------------------------------------------------------------------------------------ |
-| **FedAvg**               | [aggregation.py]  | 22-26            | İstemci güncellemelerinin (deltaların) örnek sayısına göre ağırlıklı ortalaması.                                    |
-| **FedProx**              | [client.py]       | 102-106          | Yerel sapmayı (drift) sınırlamak için loss fonksiyonuna eklenen Proximal Terim.                                     |
-| **FedProx (Agg)**        | [aggregation.py]  | 22-26            | FedProx, sunucu tarafında FedAvg ile aynı birleştirme mantığını kullanır.                                           |
-| **SCAFFOLD**             | [client.py]       | 117-122, 191-203 | Control Variates (Kontrol Değişkenleri) ile gradyan düzeltmesi ve yerel drift güncellemesi.                         |
-| **SCAFFOLD (Global)**    | [server.py]       | 191-199          | Sunucu tarafında küresel kontrol değişkeninin (c_global) güncellenmesi.                                             |
-| **FedNova**              | [aggregation.py]  | 29-37            | Yerel iterasyon (local steps) farklılıklarını normalize eden ağırlıklı birleştirme.                                 |
-| **Proposed (Cosine)**    | [aggregation.py]  | 62-67, 71-72     | Bir önceki raunt güncellemesi ile mevcut istemci güncellemesi arasındaki kosinüs benzerliğine göre ağırlıklandırma. |
-| **Proposed (Norm)**      | [aggregation.py]  | 56-60, 73-74     | İstemci güncellemelerinin L2 normuna (sapma miktarı) göre ters orantılı ağırlıklandırma.                            |
-| **Proposed (Combined)**  | [aggregation.py]  | 75-79            | Cosine similarity ve Gradient Norm metriklerinin hibrit (birleştirilmiş) kullanımı.                                 |
-| **ArcFace Loss**         | [model.py]        | 36-79            | Açısal pay (Angular Margin) ekleyerek sınıf içi benzerliği artıran kayıp fonksiyonu.                                |
-| **CosFace Loss**         | [model.py]        | 81-111           | Kosinüs payı (Cosine Margin) tabanlı büyük marjlı sınıflandırma.                                                    |
-| **Differential Privacy** | [privacy.py]      | 81-103           | Gradyan kırpma (clipping) ve Gauss gürültüsü ekleyerek veri gizliliğini sağlama.                                    |
-| **DLG Attack**           | [privacy.py]      | 7-79             | Deep Leakage from Gradients (Gradyanlardan Veri Sızıntısı) saldırı simülasyonu.                                     |
-| **Margin Warmup**        | [client.py]       | 64-72            | ArcFace marjının ilk turlarda kademeli artırılarak eğitimin stabilize edilmesi.                                     |
-| **Drift Norm Takibi**    | [client.py]       | 206-210          | Her istemcinin küresel modelden ne kadar saptığının L2 normu ile hesaplanması.                                      |
+Buna karşın, FedAvg ve FedNova yüksek doğruluğa ulaşmalarına rağmen kontrolsüz model sapmalarıyla (200+ Drift) kararsız bir profil çizmiş; SCAFFOLD ise başarılı drift kontrolüne rağmen Loss grafiklerindeki sert sıçramalar nedeniyle daha gürültülü bir seyir izlemiştir. Sonuç olarak, aşırı Non-IID koşullarda hem yüksek doğruluk hem de model bütünlüğünü koruyan FedProx ve Proposed Combined yaklaşımları, yüz biyometrisi gibi hassas görevler için en ideal çözümler olarak belirlenmiştir.
 
 ---
 
-## 🚀 Temel Özellikler
+## 🏗️ 2. Metodoloji ve Teknik Altyapı
 
-- **Aşırı Non-IID (Identity-Based):** CelebA veri seti, kimlikler (identities) cihazlar arasında asla paylaşılmayacak şekilde bölünmüştür.
-- **Backbone & Local Head Mimarisi:** ResNet-18 omurgası (backbone) federatif olarak eğitilirken, ArcFace katmanları her istemcide yerel (local) tutulur ve sunucu tarafından kalıcılığı (persistence) sağlanır.
-- **Dinamik Ölçekleme (Scale Warmup):** ArcFace ölçek parametresi (`s`), ilk rauntlarda kademeli artırılarak gradyan patlamaları önlenir.
-- **Kapsamlı Metrikler:** Sadece kayıp (loss) değil, aynı zamanda Top-1/Top-5 doğruluk, model sapması (drift) ve "unseen" (hiç görülmemiş) test setinde Face Verification başarımı ölçülür.
+### 2.1. Veri Dağıtımı (Extreme Non-IID)
+Sıradan FL projelerinin aksine, bu projede veri setindeki her bir "Person ID", yalnızca belirli bir istemciye atanmıştır. Bu, istemciler arasındaki gradyanların birbirinden çok uzak olmasına neden olan **"Weight Divergence"** (Ağırlık Sapması) sorununu tetiklemektedir.
 
----
-
-## 📂 Dosya Yapısı
-
-- `main.py`: Deneylerin ana giriş noktası. Algoritmaları yarıştırır ve görselleştirir.
-- `server.py`: Küresel model yönetimi, istemci seçimi ve SCAFFOLD küresel güncellemeleri.
-- `client.py`: Yerel eğitim döngüsü, FedProx/SCAFFOLD yerel mantığı ve DP uygulaması.
-- `aggregation.py`: **Tüm birleştirme algoritmalarının merkezi.** FedAvg, FedNova ve Önerilen (Proposed) yöntemler burada bulunur.
-- `model.py`: `FaceResNet18`, `ArcFaceLoss` ve `CosFaceLoss` tanımları.
-- `privacy.py`: Diferansiyel Gizlilik (DP) ve DLG saldırı araçları.
-- `dataset.py`: CelebA Identity-Based veri yükleyici.
+### 2.2. Model Mimarisi: Backbone & Local Head
+Eğitimde **ResNet-18** omurgası küresel (global) olarak paylaşılırken, yüz tanıma başarısını artıran **ArcFace** katmanı her istemcide yerel (local) tutulmuştur. Bu sayede kişisel özniteliklerin sunucuya sızması engellenmiş ve gizlilik katmanı güçlendirilmiştir.
 
 ---
 
-## 🛠️ Kullanım
+## 📊 3. Uygulanan Algoritmalar ve Kod Referansı
 
-### 1. Hazırlık
-
-Gerekli kütüphaneleri yükleyin:
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Veri Bölümleme
-
-Veri setini 50 istemciye kimlik tabanlı olarak ayırmak için:
-
-```bash
-python partition_data.py
-```
-
-### 3. Eğitim ve Kıyaslama
-
-Farklı algoritmaları test etmek için `main.py` dosyasını çalıştırın:
-
-```bash
-python main.py
-```
-
-Eğitim sonunda `results_plot.png` ve her algoritma için `live_plot_{algo}.png` dosyaları otomatik olarak oluşturulacaktır.
+| Algoritma / Teknik | Fonksiyonel Katkı | Kod Referansı |
+| :--- | :--- | :--- |
+| **FedAvg** | İstemci modellerinin düz bir ortalamasını alarak birleştirir. | [aggregation.py](file:///c:/Users/root/project/federetad_learning/aggregation.py) [22-26] |
+| **FedProx** | Proximal terim ile yerel güncellemelerin küresel modelden kopmasını engeller. | [client.py](file:///c:/Users/root/project/federetad_learning/client.py) [102-106] |
+| **SCAFFOLD** | Kontrol değişkenleri kullanarak istemci gradyanlarındaki sapmayı (drift) düzeltir. | [server.py](file:///c:/Users/root/project/federetad_learning/server.py) [191-199] |
+| **FedNova** | Farklı yerel iterasyon sayılarına sahip istemcileri normalize ederek birleştirir. | [aggregation.py](file:///c:/Users/root/project/federetad_learning/aggregation.py) [29-37] |
+| **Proposed (Combined)** | Gradient Norm ve Cosine Similarity metriklerini birleştirerek ağırlıklandırma yapar. | [aggregation.py](file:///c:/Users/root/project/federetad_learning/aggregation.py) [75-79] |
+| **Differential Privacy** | Gradyanlara gürültü ekleyerek DLG saldırılarına karşı koruma sağlar. | [privacy.py](file:///c:/Users/root/project/federetad_learning/privacy.py) [81-103] |
+| **ArcFace Loss** | Açısal pay ekleyerek sınıf içi benzerliği artıran kayıp fonksiyonu. | [model.py](file:///c:/Users/root/project/federetad_learning/model.py) [36-79] |
+| **DLG Attack** | Gradyanlardan veri sızıntısı saldırı simülasyonu. | [privacy.py](file:///c:/Users/root/project/federetad_learning/privacy.py) [7-79] |
 
 ---
 
-## 📈 Ölçüm ve Değerlendirme
+## 📈 4. Deneysel Sonuçlar ve Analiz
 
-Sistem her rauntta şu metrikleri raporlar:
+### 4.1. FedAvg: Kaotik Yakınsama
+- **Gözlem:** Sert zikzaklar ve ani kayıp (Loss) sıçramaları (özellikle 10. rauntta).
+- **Analiz:** FedAvg, aşırı Non-IID dağılımdaki gradyan çatışmasını düzeltecek bir mekanizmaya sahip değildir. Model sapması (Drift) 190.03 seviyelerine çıkarak bir "dağılma krizi" yaşatmıştır.
 
-- **Avg Loss:** Seçilen istemcilerin ortalama eğitim kaybı.
-- **Avg Acc:** İstemci tarafındaki yerel Top-1 doğruluk oranı.
-- **Test Acc (Verification):** Hiç görülmemiş test kimlikleri üzerinde modelin yüz doğrulama başarımı (Cosine Similarity tabanlı).
-- **Avg Drift:** İstemci modellerinin küresel modelden uzaklaşma miktarı (L2).
+### 4.2. FedNova: Agresif Başarı, Yüksek Varyans
+- **Gözlem:** %95.33 tepe doğruluğa ulaşsa da, Drift grafiğinde 213.42 seviyelerinde devasa sıçramalar görülmüştür.
+- **Analiz:** Normalizasyon çabasına rağmen yerel modeller globalden sert bir şekilde kopmaktadır.
+
+### 4.3. FedProx: Regülasyon Lideri (🏆 En İyi Performans)
+- **Gözlem:** **%97.29 Accuracy** ve sadece **35-70** bandında kalan Drift.
+- **Analiz:** Proksimal terim (proximal term), yerel güncellemelerin küresel modelden kopmasını en efektid şekilde dizginlemiş, en dengeli ve güvenli optimizasyon profilini çizmiştir.
+
+### 4.4. Proposed Combined: İnovatif Hibrit Yaklaşım
+- **Gözlem:** %95.40 doğruluk ve pürüzsüz bir öğrenme eğrisi.
+- **Analiz:** Hem gradyan yönü (Cosine Similarity) hem de büyüklüğünü (Norm) temel alan ağırlıklandırma mekanizması, istemcilerin global modelden kopmasını engellemede üstün başarı göstermiştir.
+
+### 4.5. SCAFFOLD: Yönsel Denge
+- **Gözlem:** Drift değerleri 60-85 bandında (maksimum 98) baskılanmıştır.
+- **Analiz:** Kontrol değişkenleri gradyan heterojenliğini başarıyla dengelemiş olsa da, eğitim sırasında kayıp (loss) değerinde dalgalanmalar yaşanmıştır.
 
 ---
 
+## 🏁 5. Sonuç
+
+Aşırı Non-IID koşullarda hem yüksek doğruluk hem de model bütünlüğünü koruyan **FedProx** ve **Proposed Combined** yaklaşımları, yüz biyometrisi gibi hassas görevler için en ideal çözümlerdir. FedProx mutlak doğruluk ve stabilite lideri iken, Proposed Combined akıllı ağırlıklandırma mekanizmasıyla güçlü bir alternatif sunmaktadır.
+
+---
+
+### 👤 Geliştirici Bilgileri
+- **İsim:** BARTU BAŞARAN
+- **Öğrenci No:** 259120012
+- **GitHub:** [baartu/federer_learning](https://github.com/baartu/federer_learning)
+
+---
 > [!NOTE]
-> Bu proje, akademik araştırma amaçlı olup federatif öğrenmede model sapmasını (client drift) azaltmaya yönelik yeni yöntemlerin test edilmesi için geliştirilmiştir.
+> Bu proje, akademik araştırma amaçlı olup federatif öğrenmede model sapmasını azaltmaya yönelik yeni yöntemlerin test edilmesi için geliştirilmiştir.
